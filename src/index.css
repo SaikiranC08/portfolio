@@ -32,3 +32,99 @@ details > summary::-webkit-details-marker {
 details[open] summary .toggle-icon {
   transform: rotate(90deg);
 }
+
+@keyframes heroRevealTop {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes heroDrawArrow {
+  from {
+    clip-path: inset(0 0 100% 0);
+    opacity: 0;
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+@keyframes heroRevealBottom {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes heroRevealSimple {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-anim-1 {
+    animation: heroRevealTop 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.0s forwards;
+    opacity: 0;
+  }
+  .hero-anim-2 {
+    animation: heroRevealTop 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.15s forwards;
+    opacity: 0;
+  }
+  .hero-anim-3 {
+    animation: heroRevealTop 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.30s forwards;
+    opacity: 0;
+  }
+  .hero-anim-4 {
+    animation: heroRevealTop 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.45s forwards;
+    opacity: 0;
+  }
+  .hero-anim-5 {
+    animation: heroDrawArrow 0.32s cubic-bezier(0.22, 1, 0.36, 1) 0.65s forwards;
+    clip-path: inset(0 0 100% 0);
+    opacity: 0;
+  }
+  .hero-anim-6 {
+    animation: heroRevealBottom 0.40s cubic-bezier(0.22, 1, 0.36, 1) 0.95s forwards;
+    opacity: 0;
+  }
+  .hero-anim-7 {
+    animation: heroRevealBottom 0.40s cubic-bezier(0.22, 1, 0.36, 1) 1.10s forwards;
+    opacity: 0;
+  }
+  .hero-anim-8 {
+    animation: heroRevealSimple 0.40s cubic-bezier(0.22, 1, 0.36, 1) 1.25s forwards;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-anim-1,
+  .hero-anim-2,
+  .hero-anim-3,
+  .hero-anim-4,
+  .hero-anim-5,
+  .hero-anim-6,
+  .hero-anim-7,
+  .hero-anim-8 {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    clip-path: none !important;
+  }
+}
+
+
