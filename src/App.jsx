@@ -7,7 +7,7 @@ import {
 } from './services/appreciationService';
 
 /* ─── 3D Tech Globe Component ─── */
-function TechGlobe({ activeFilter }) {
+function TechGlobe({ activeFilter, theme }) {
   const containerRef = useRef(null);
   const tooltipRef = useRef(null);
   const globeRef = useRef(null);
@@ -16,6 +16,9 @@ function TechGlobe({ activeFilter }) {
   const nodesRef = useRef([]);
   const arcsRef = useRef([]);
   const arcStreamsRef = useRef([]);
+  const sphereMatRef = useRef(null);
+  const wireMatRef = useRef(null);
+  const ringMatRef = useRef(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -31,11 +34,12 @@ function TechGlobe({ activeFilter }) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.z = 240;
+    camera.position.z = width < 480 ? 275 : 240;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.domElement.style.touchAction = 'pan-y';
     container.insertBefore(renderer.domElement, container.firstChild);
 
     const globeGroup = new THREE.Group();
@@ -43,29 +47,32 @@ function TechGlobe({ activeFilter }) {
     globeRef.current = globeGroup;
 
     const GLOBE_RADIUS = 75;
+    const isDark = theme === 'dark';
 
     // Solid globe sphere
     const sphereGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 36, 36);
     const sphereMat = new THREE.MeshBasicMaterial({
-      color: 0xf7f6f3,
+      color: isDark ? 0x202020 : 0xf7f6f3,
       transparent: true,
       opacity: 0.85
     });
     globeGroup.add(new THREE.Mesh(sphereGeo, sphereMat));
+    sphereMatRef.current = sphereMat;
 
     // Wireframe overlay
     const wireMat = new THREE.MeshBasicMaterial({
-      color: 0xdfdeda,
+      color: isDark ? 0x303030 : 0xdfdeda,
       wireframe: true,
       transparent: true,
       opacity: 0.5
     });
     globeGroup.add(new THREE.Mesh(sphereGeo, wireMat));
+    wireMatRef.current = wireMat;
 
     // Orbital ring
     const ringGeo = new THREE.RingGeometry(GLOBE_RADIUS * 1.15, GLOBE_RADIUS * 1.16, 64);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xd3d1cb,
+      color: isDark ? 0x383838 : 0xd3d1cb,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.4
@@ -73,6 +80,7 @@ function TechGlobe({ activeFilter }) {
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = Math.PI / 2.3;
     globeGroup.add(ring);
+    ringMatRef.current = ringMat;
 
     // Categories
     const categories = {
@@ -260,13 +268,46 @@ function TechGlobe({ activeFilter }) {
     // Interaction
     let isDragging = false;
     let prevMousePos = { x: 0, y: 0 };
+    let pointerMoveDistance = 0;
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
     let hoveredSprite = null;
 
+    function selectNode(hit, clientX, clientY, rect) {
+      if (hoveredSprite && hoveredSprite !== hit && hoveredSprite.userData.marker) {
+        hoveredSprite.userData.marker.scale.set(1, 1, 1);
+      }
+      hoveredSprite = hit;
+      container.style.cursor = 'pointer';
+      if (hit.userData.marker) {
+        hit.userData.marker.scale.set(1.6, 1.6, 1.6);
+      }
+      const data = hit.userData;
+      if (tooltip) {
+        tooltip.innerHTML = `<div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;margin-bottom:2px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${data.catColor}"></span>${data.name}</div><div style="font-size:11px;color:var(--muted);font-weight:500">${data.catName}</div>${data.desc ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;font-family:Inter,system-ui,sans-serif;font-style:normal">${data.desc}</div>` : ''}`;
+        tooltip.style.display = 'block';
+        const posX = Math.min(rect.width - 150, Math.max(10, clientX - rect.left + 14));
+        const posY = Math.min(rect.height - 70, Math.max(10, clientY - rect.top + 10));
+        tooltip.style.left = `${posX}px`;
+        tooltip.style.top = `${posY}px`;
+      }
+    }
+
+    function clearSelectedNode() {
+      if (hoveredSprite) {
+        if (hoveredSprite.userData.marker) {
+          hoveredSprite.userData.marker.scale.set(1, 1, 1);
+        }
+        hoveredSprite = null;
+        container.style.cursor = 'default';
+        if (tooltip) tooltip.style.display = 'none';
+      }
+    }
+
     function onPointerDown(e) {
       isDragging = true;
       prevMousePos = { x: e.clientX, y: e.clientY };
+      pointerMoveDistance = 0;
     }
 
     function onPointerMove(e) {
@@ -277,51 +318,39 @@ function TechGlobe({ activeFilter }) {
       if (isDragging) {
         const deltaX = e.clientX - prevMousePos.x;
         const deltaY = e.clientY - prevMousePos.y;
+        pointerMoveDistance += Math.abs(deltaX) + Math.abs(deltaY);
         globeGroup.rotation.y += deltaX * 0.006;
         globeGroup.rotation.x += deltaY * 0.006;
         prevMousePos = { x: e.clientX, y: e.clientY };
       }
 
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(interactiveMeshes);
-
-      if (intersects.length > 0) {
-        const hit = intersects[0].object;
-        if (hoveredSprite !== hit) {
-          // Reset previous
-          if (hoveredSprite && hoveredSprite.userData.marker) {
-            hoveredSprite.userData.marker.scale.set(1, 1, 1);
-          }
-          hoveredSprite = hit;
-          container.style.cursor = 'pointer';
-          // Highlight hovered node
-          if (hit.userData.marker) {
-            hit.userData.marker.scale.set(1.6, 1.6, 1.6);
-          }
-          const data = hit.userData;
-          if (tooltip) {
-            tooltip.innerHTML = `<div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;margin-bottom:2px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${data.catColor}"></span>${data.name}</div><div style="font-size:11px;color:rgba(55,53,47,0.5);font-weight:500">${data.catName}</div>${data.desc ? `<div style="font-size:11px;color:rgba(55,53,47,0.65);margin-top:3px;font-family:Inter,system-ui,sans-serif;font-style:normal">${data.desc}</div>` : ''}`;
-            tooltip.style.display = 'block';
-          }
-        }
-        if (tooltip) {
-          tooltip.style.left = `${e.clientX - rect.left + 14}px`;
-          tooltip.style.top = `${e.clientY - rect.top + 10}px`;
-        }
-      } else {
-        if (hoveredSprite) {
-          if (hoveredSprite.userData.marker) {
-            hoveredSprite.userData.marker.scale.set(1, 1, 1);
-          }
-          hoveredSprite = null;
-          container.style.cursor = 'default';
-          if (tooltip) tooltip.style.display = 'none';
+      // Hover-based inspection for desktop pointer
+      if (e.pointerType !== 'touch') {
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(interactiveMeshes);
+        if (intersects.length > 0) {
+          selectNode(intersects[0].object, e.clientX, e.clientY, rect);
+        } else {
+          clearSelectedNode();
         }
       }
     }
 
-    function onPointerUp() {
+    function onPointerUp(e) {
       isDragging = false;
+      // If tap/click without dragging, select node or toggle tooltip
+      if (pointerMoveDistance < 8) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(interactiveMeshes);
+        if (intersects.length > 0) {
+          selectNode(intersects[0].object, e.clientX, e.clientY, rect);
+        } else {
+          clearSelectedNode();
+        }
+      }
     }
 
     function onWheel(e) {
@@ -338,12 +367,13 @@ function TechGlobe({ activeFilter }) {
     // Keyboard accessibility
     renderer.domElement.setAttribute('tabindex', '0');
     renderer.domElement.setAttribute('role', 'img');
-    renderer.domElement.setAttribute('aria-label', 'Interactive 3D technology map showing technical skills organized by category. Drag to rotate, scroll to zoom, hover over nodes for details.');
+    renderer.domElement.setAttribute('aria-label', 'Interactive 3D technology map showing technical skills organized by category. Drag to rotate, scroll to zoom, hover or tap nodes for details.');
 
     function onWindowResize() {
       const w = container.clientWidth || 800;
       const h = container.clientHeight || 460;
       camera.aspect = w / h;
+      camera.position.z = w < 480 ? 275 : 240;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     }
@@ -408,28 +438,647 @@ function TechGlobe({ activeFilter }) {
     });
   }, [activeFilter]);
 
+  // Update 3D materials dynamically when theme changes
+  useEffect(() => {
+    const isDark = theme === 'dark';
+    if (sphereMatRef.current) {
+      sphereMatRef.current.color.setHex(isDark ? 0x202020 : 0xf7f6f3);
+    }
+    if (wireMatRef.current) {
+      wireMatRef.current.color.setHex(isDark ? 0x303030 : 0xdfdeda);
+    }
+    if (ringMatRef.current) {
+      ringMatRef.current.color.setHex(isDark ? 0x383838 : 0xd3d1cb);
+    }
+  }, [theme]);
+
   return (
     <div className="rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] overflow-hidden">
       <div
         ref={containerRef}
-        className="relative w-full h-[380px] sm:h-[420px] md:h-[460px] bg-[#faf9f6] overflow-hidden flex items-center justify-center"
+        className="relative w-full h-[260px] sm:h-[360px] md:h-[440px] bg-[#faf9f6] overflow-hidden flex items-center justify-center select-none"
+        style={{ touchAction: 'pan-y' }}
       >
         {/* Tooltip */}
         <div
           ref={tooltipRef}
           className="absolute pointer-events-none z-50 px-3 py-2 rounded-lg text-xs transition-opacity duration-150 border"
-          style={{ display: 'none', background: '#ffffff', borderColor: '#e3e2de', color: '#37352f', boxShadow: '0 4px 12px rgba(15,15,15,0.1)' }}
+          style={{ display: 'none', background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--foreground)', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
         />
-        {/* Bottom legend — no counts */}
-        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center gap-4 pointer-events-none bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-lg border border-[#e9e9e7] text-[11px]">
-          <span className="flex items-center gap-1.5 text-[#d9730d] font-medium"><span className="w-2 h-2 rounded-full bg-[#d9730d]"></span>Backend</span>
-          <span className="flex items-center gap-1.5 text-[#0b6e99] font-medium"><span className="w-2 h-2 rounded-full bg-[#0b6e99]"></span>Data &amp; Messaging</span>
-          <span className="flex items-center gap-1.5 text-[#6940a5] font-medium"><span className="w-2 h-2 rounded-full bg-[#6940a5]"></span>DevOps</span>
-          <span className="flex items-center gap-1.5 text-[#0f7b6c] font-medium"><span className="w-2 h-2 rounded-full bg-[#0f7b6c]"></span>Frontend</span>
-          <span className="ml-auto text-[rgba(55,53,47,0.35)] text-[10px] hidden sm:inline">Drag to rotate · Scroll to zoom · Hover for details</span>
+        {/* Bottom legend — responsive & touch-friendly */}
+        <div className="absolute bottom-2 left-2 right-2 sm:bottom-3 sm:left-3 sm:right-3 flex flex-wrap items-center gap-2 sm:gap-4 pointer-events-none bg-white/95 backdrop-blur-md px-2.5 sm:px-3 py-1.5 rounded-lg border border-[#e9e9e7] text-[10px] sm:text-[11px]">
+          <span className="flex items-center gap-1 sm:gap-1.5 text-[#d9730d] font-medium"><span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#d9730d]"></span>Backend</span>
+          <span className="flex items-center gap-1 sm:gap-1.5 text-[#0b6e99] font-medium"><span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#0b6e99]"></span>Data &amp; Messaging</span>
+          <span className="flex items-center gap-1 sm:gap-1.5 text-[#6940a5] font-medium"><span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#6940a5]"></span>DevOps</span>
+          <span className="flex items-center gap-1 sm:gap-1.5 text-[#0f7b6c] font-medium"><span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#0f7b6c]"></span>Frontend</span>
+          <span className="ml-auto text-[rgba(55,53,47,0.35)] text-[10px] hidden sm:inline">Drag to rotate · Tap for details</span>
         </div>
       </div>
     </div>
+  );
+}
+
+/* ─── Technology Tag Styles (Consistent, Notion-style soft colors) ─── */
+const TECH_TAG_STYLES = {
+  'Java': 'bg-[#fadec9] text-[#854c1d]',
+  'Spring Boot': 'bg-[#dbeddb] text-[#286644]',
+  'REST APIs': 'bg-[#daf1ea] text-[#1b6e56]',
+  'PostgreSQL': 'bg-[#e8deee] text-[#5c3882]',
+  'Docker': 'bg-[#d3e5ef] text-[#205d86]',
+  'Kong API Gateway': 'bg-[#fdecc8] text-[#8f632d]',
+  'Kong API GW': 'bg-[#fdecc8] text-[#8f632d]',
+  'JWT': 'bg-[#e8deee] text-[#5c3882]',
+  'WebSocket': 'bg-[#daf1ea] text-[#1b6e56]',
+  'Kafka': 'bg-[#fdecc8] text-[#8f632d]',
+  'React': 'bg-[#d3e5ef] text-[#205d86]',
+  'TypeScript': 'bg-[#d3e5ef] text-[#205d86]',
+  'Python': 'bg-[#d3e5ef] text-[#205d86]',
+  'Node.js': 'bg-[#dbeddb] text-[#286644]',
+  'Microservices': 'bg-[#dbeddb] text-[#286644]',
+};
+
+function getTechTagClass(tech) {
+  return TECH_TAG_STYLES[tech] || 'bg-[#f1f1ef] text-[#37352f] border border-[#e9e9e7]';
+}
+
+/* ─── Projects Data ─── */
+const PROJECTS = [
+  {
+    id: 'inventoryhub',
+    name: 'InventoryHub',
+    subtitle: 'Multi-Business Inventory Management Platform',
+    category: 'Backend · Microservices',
+    status: '● Live',
+    description: "A microservices-based inventory platform for managing products, stock, transfers, and business operations through secure REST APIs.",
+    technologies: [
+      'Java',
+      'Spring Boot',
+      'REST APIs',
+      'PostgreSQL',
+      'Docker',
+      'Kong API Gateway'
+    ],
+    liveUrl: 'https://github.com/SaikiranC08/InventoryHub',
+    githubUrl: 'https://github.com/SaikiranC08/InventoryHub',
+    image: null,
+    imageAlt: 'InventoryHub Multi-Business Inventory Management Dashboard and Stock Table'
+  }
+];
+
+/* ─── InventoryHub Product Application Visual (Primary Card Visual) ─── */
+function InventoryHubProductVisual() {
+  return (
+    <div className="w-full h-40 sm:h-44 bg-[#fcfcfb] border-b border-[#e9e9e7] select-none flex flex-col justify-between p-2.5 sm:p-3 font-sans text-[#37352f] overflow-hidden">
+      {/* App Bar / Business Tenant Header */}
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#ecece9]">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-5 h-5 rounded bg-[#2383e2] text-white flex items-center justify-center text-[11px] font-bold shrink-0">
+            📦
+          </div>
+          <span className="text-[12px] font-semibold text-[#37352f] truncate">
+            InventoryHub
+          </span>
+          <span className="text-[10.5px] text-[rgba(55,53,47,0.45)]">/</span>
+          {/* Multi-Tenant Business Switcher */}
+          <div className="flex items-center gap-1 bg-[#f1f1ef] px-1.5 py-0.5 rounded text-[10.5px] text-[#37352f] border border-[#e3e2e0]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#286644]"></span>
+            <span className="font-medium truncate max-w-[90px] sm:max-w-[150px]">Apex Retailers Ltd</span>
+            <span className="text-[9px] text-[rgba(55,53,47,0.5)]">▾</span>
+          </div>
+        </div>
+
+        {/* Live sync badge & SKU counter */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="hidden sm:inline-flex text-[10px] font-mono text-[rgba(55,53,47,0.55)] bg-white px-1.5 py-0.5 rounded border border-[#e9e9e7]">
+            1,420 SKUs · 3 Warehouses
+          </span>
+          <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium text-[#286644] bg-[#dbeddb] px-1.5 py-0.5 rounded">
+            <span className="w-1 h-1 rounded-full bg-[#286644] animate-pulse"></span>
+            <span>Live</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Product Stock Table Preview */}
+      <div className="flex-1 my-1.5 overflow-hidden flex flex-col justify-center">
+        <table className="w-full text-left border-collapse text-[11px]">
+          <thead>
+            <tr className="border-b border-[#f1f1ef] text-[9.5px] font-mono uppercase tracking-wider text-[rgba(55,53,47,0.45)]">
+              <th className="pb-1 font-medium">SKU / Item</th>
+              <th className="pb-1 font-medium hidden sm:table-cell">Warehouse</th>
+              <th className="pb-1 font-medium text-right sm:text-left">Stock Level</th>
+              <th className="pb-1 font-medium text-right">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#f7f7f5] text-[10.5px]">
+            <tr>
+              <td className="py-1 font-medium text-[#37352f] truncate max-w-[160px]">
+                <span className="font-mono text-[9.5px] text-[rgba(55,53,47,0.5)] mr-1">SKU-9402</span>
+                Pro Barcode Scanner
+              </td>
+              <td className="py-1 text-[rgba(55,53,47,0.6)] text-[10px] hidden sm:table-cell">WH-North A3</td>
+              <td className="py-1 font-mono text-[10px] text-right sm:text-left">
+                <span className="text-[#37352f] font-medium">340</span>
+                <span className="text-[rgba(55,53,47,0.4)] text-[9px]"> / 500</span>
+              </td>
+              <td className="py-1 text-right">
+                <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-medium bg-[#dbeddb] text-[#286644]">
+                  In Stock
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td className="py-1 font-medium text-[#37352f] truncate max-w-[160px]">
+                <span className="font-mono text-[9.5px] text-[rgba(55,53,47,0.5)] mr-1">SKU-3118</span>
+                Thermal Label 4x6
+              </td>
+              <td className="py-1 text-[rgba(55,53,47,0.6)] text-[10px] hidden sm:table-cell">WH-Central B12</td>
+              <td className="py-1 font-mono text-[10px] text-right sm:text-left">
+                <span className="text-[#854c1d] font-medium">42</span>
+                <span className="text-[rgba(55,53,47,0.4)] text-[9px]"> / 200</span>
+              </td>
+              <td className="py-1 text-right">
+                <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-medium bg-[#fadec9] text-[#854c1d]">
+                  Low Stock
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td className="py-1 font-medium text-[#37352f] truncate max-w-[160px]">
+                <span className="font-mono text-[9.5px] text-[rgba(55,53,47,0.5)] mr-1">SKU-8841</span>
+                Heavy Pallet Rack
+              </td>
+              <td className="py-1 text-[rgba(55,53,47,0.6)] text-[10px] hidden sm:table-cell">WH-East C04</td>
+              <td className="py-1 font-mono text-[10px] text-right sm:text-left">
+                <span className="text-[#37352f] font-medium">180</span>
+                <span className="text-[rgba(55,53,47,0.4)] text-[9px]"> / 180</span>
+              </td>
+              <td className="py-1 text-right">
+                <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-medium bg-[#dbeddb] text-[#286644]">
+                  In Stock
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mini Status Footer / Inter-Warehouse Transfer Indicator */}
+      <div className="pt-1.5 border-t border-[#ecece9] flex items-center justify-between text-[9.5px] text-[rgba(55,53,47,0.5)] font-mono">
+        <div className="flex items-center gap-1.5 truncate">
+          <span className="text-[#2383e2]">⇄</span>
+          <span className="truncate">Transfer #TR-8821 in-transit: WH-North → WH-Central (120 units)</span>
+        </div>
+        <span className="hidden sm:inline text-[rgba(55,53,47,0.4)]">Tenant Isolation ✓</span>
+      </div>
+    </div>
+  );
+}
+
+/* ─── InventoryHub Architecture Visual ─── */
+function InventoryHubArchitectureVisual() {
+  return (
+    <div className="w-full bg-[#fbfbfa] py-3 sm:py-4 px-3 sm:px-6 select-none flex items-center justify-center">
+      <svg
+        viewBox="0 0 700 170"
+        className="w-full h-40 sm:h-44 max-w-[660px]"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <pattern id="arch-grid" width="16" height="16" patternUnits="userSpaceOnUse">
+            <circle cx="2" cy="2" r="1" fill="#ecebe8" />
+          </pattern>
+          <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <polygon points="0 0, 6 3, 0 6" fill="#8f8e8b" />
+          </marker>
+        </defs>
+
+        <rect width="700" height="170" fill="url(#arch-grid)" rx="6" />
+
+        {/* 1. API Clients Box */}
+        <g transform="translate(18, 50)">
+          <rect width="112" height="70" rx="6" fill="#ffffff" stroke="#e3e2e0" strokeWidth="1" />
+          <rect x="8" y="8" width="22" height="16" rx="3" fill="#f1f1ef" />
+          <text x="19" y="19" textAnchor="middle" fontSize="9" fill="#6a675e" fontFamily="monospace">API</text>
+          <text x="36" y="20" fontSize="12" fontWeight="600" fill="#37352f" fontFamily="system-ui, sans-serif">Clients</text>
+          <text x="12" y="42" fontSize="10.5" fill="rgba(55,53,47,0.65)" fontFamily="system-ui, sans-serif">Web &amp; External Apps</text>
+          <text x="12" y="56" fontSize="9.5" fill="rgba(55,53,47,0.45)" fontFamily="monospace">HTTPS / REST JSON</text>
+        </g>
+
+        {/* Connector: Clients -> Gateway */}
+        <path d="M 130 85 L 168 85" stroke="#a5a4a1" strokeWidth="1.2" strokeDasharray="3 3" markerEnd="url(#arrowhead)" />
+
+        {/* 2. Kong API Gateway Box */}
+        <g transform="translate(175, 34)">
+          <rect width="138" height="102" rx="6" fill="#ffffff" stroke="#37352f" strokeWidth="1.2" />
+          <rect x="10" y="8" width="68" height="16" rx="3" fill="#37352f" />
+          <text x="44" y="19" textAnchor="middle" fontSize="8.5" fontWeight="600" fill="#ffffff" fontFamily="monospace">API GATEWAY</text>
+          <text x="12" y="42" fontSize="12.5" fontWeight="600" fill="#37352f" fontFamily="system-ui, sans-serif">Kong Gateway</text>
+          <text x="12" y="59" fontSize="10" fill="rgba(55,53,47,0.65)" fontFamily="system-ui, sans-serif">Port 8000 · Ingress</text>
+          <line x1="12" y1="67" x2="126" y2="67" stroke="#f1f1ef" strokeWidth="1" />
+          <text x="12" y="81" fontSize="9.5" fill="rgba(55,53,47,0.6)" fontFamily="monospace">✓ JWT Auth &amp; RBAC</text>
+          <text x="12" y="93" fontSize="9.5" fill="rgba(55,53,47,0.6)" fontFamily="monospace">✓ Rate Limiting &amp; CORS</text>
+        </g>
+
+        {/* Branching Connectors: Gateway -> Microservices */}
+        <path d="M 313 70 Q 338 70, 350 46" stroke="#a5a4a1" strokeWidth="1.2" strokeDasharray="3 3" markerEnd="url(#arrowhead)" />
+        <path d="M 313 85 L 350 85" stroke="#a5a4a1" strokeWidth="1.2" strokeDasharray="3 3" markerEnd="url(#arrowhead)" />
+        <path d="M 313 100 Q 338 100, 350 124" stroke="#a5a4a1" strokeWidth="1.2" strokeDasharray="3 3" markerEnd="url(#arrowhead)" />
+
+        {/* 3. Microservices Cluster Box (Dashed grouping) */}
+        <rect x="350" y="16" width="186" height="138" rx="6" fill="none" stroke="#d0d0cc" strokeWidth="1" strokeDasharray="4 4" />
+        <text x="360" y="12" fontSize="9" fontWeight="600" fill="rgba(55,53,47,0.5)" fontFamily="monospace">SPRING BOOT MICROSERVICES</text>
+
+        {/* Service 1: Auth & Tenant Service */}
+        <g transform="translate(358, 28)">
+          <rect width="170" height="34" rx="4" fill="#ffffff" stroke="#e3e2e0" strokeWidth="1" />
+          <circle cx="12" cy="17" r="3.5" fill="#286644" />
+          <text x="22" y="16" fontSize="11" fontWeight="600" fill="#37352f" fontFamily="system-ui, sans-serif">Auth &amp; Tenant Service</text>
+          <text x="22" y="27" fontSize="8.5" fill="rgba(55,53,47,0.5)" fontFamily="monospace">JWT · Tenant Isolation</text>
+        </g>
+
+        {/* Service 2: Product Catalog Service */}
+        <g transform="translate(358, 68)">
+          <rect width="170" height="34" rx="4" fill="#ffffff" stroke="#e3e2e0" strokeWidth="1" />
+          <circle cx="12" cy="17" r="3.5" fill="#286644" />
+          <text x="22" y="16" fontSize="11" fontWeight="600" fill="#37352f" fontFamily="system-ui, sans-serif">Product Catalog Service</text>
+          <text x="22" y="27" fontSize="8.5" fill="rgba(55,53,47,0.5)" fontFamily="monospace">SKUs · Categories · Variants</text>
+        </g>
+
+        {/* Service 3: Stock & Transfer Service */}
+        <g transform="translate(358, 108)">
+          <rect width="170" height="34" rx="4" fill="#ffffff" stroke="#e3e2e0" strokeWidth="1" />
+          <circle cx="12" cy="17" r="3.5" fill="#286644" />
+          <text x="22" y="16" fontSize="11" fontWeight="600" fill="#37352f" fontFamily="system-ui, sans-serif">Stock &amp; Transfer Service</text>
+          <text x="22" y="27" fontSize="8.5" fill="rgba(55,53,47,0.5)" fontFamily="monospace">Real-Time Balances · Audit</text>
+        </g>
+
+        {/* Connector: Microservices -> DB */}
+        <path d="M 536 85 L 568 85" stroke="#a5a4a1" strokeWidth="1.2" strokeDasharray="3 3" markerEnd="url(#arrowhead)" />
+
+        {/* 4. Database & Infrastructure Box */}
+        <g transform="translate(574, 38)">
+          <rect width="112" height="94" rx="6" fill="#ffffff" stroke="#e3e2e0" strokeWidth="1" />
+          <rect x="8" y="8" width="56" height="15" rx="3" fill="#e8deee" />
+          <text x="36" y="18.5" textAnchor="middle" fontSize="8.5" fontWeight="600" fill="#5c3882" fontFamily="monospace">POSTGRESQL</text>
+          <text x="10" y="40" fontSize="12" fontWeight="600" fill="#37352f" fontFamily="system-ui, sans-serif">PostgreSQL</text>
+          <text x="10" y="55" fontSize="9.5" fill="rgba(55,53,47,0.6)" fontFamily="system-ui, sans-serif">Relational Datastore</text>
+          <line x1="10" y1="63" x2="102" y2="63" stroke="#f1f1ef" strokeWidth="1" />
+          <text x="10" y="76" fontSize="9" fill="rgba(55,53,47,0.5)" fontFamily="monospace">ACID Transactions</text>
+          <text x="10" y="88" fontSize="9" fill="rgba(55,53,47,0.5)" fontFamily="monospace">Docker Network</text>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+/* ─── InventoryHub Detailed Project Page ─── */
+function InventoryHubDetailPage({ onNavigate }) {
+  return (
+    <main className="w-full overflow-y-auto pb-28">
+      <div className="max-w-[760px] mx-auto px-4 sm:px-12 py-8 sm:py-14">
+        {/* Back navigation */}
+        <div className="mb-6">
+          <button 
+            onClick={() => onNavigate('portfolio', 'projects')}
+            className="inline-flex items-center gap-1.5 text-[12px] text-[rgba(55,53,47,0.6)] hover:text-[#37352f] px-2 py-1 rounded hover:bg-[rgba(55,53,47,0.06)] transition-colors"
+          >
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            <span>Back to Featured Projects</span>
+          </button>
+        </div>
+
+        {/* Notion Page Icon & Title */}
+        <div className="mb-6">
+          <div className="text-[36px] mb-2 select-none">📦</div>
+          <h1 className="text-[32px] sm:text-[36px] font-bold text-[#37352f] tracking-tight mb-2">
+            InventoryHub
+          </h1>
+          <p className="text-[16px] text-[rgba(55,53,47,0.7)]">
+            Multi-Business Inventory Management Platform
+          </p>
+        </div>
+
+        {/* Notion Properties Table */}
+        <div className="rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] p-4 sm:p-5 mb-8 text-[13px] space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-1 sm:gap-4 items-center">
+            <span className="text-[rgba(55,53,47,0.55)] flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px]">category</span>
+              <span>Category</span>
+            </span>
+            <span className="text-[#37352f] font-mono text-[12px] bg-white px-2 py-0.5 rounded border border-[#e9e9e7] inline-block w-fit">
+              Backend · Microservices
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-1 sm:gap-4 items-center">
+            <span className="text-[rgba(55,53,47,0.55)] flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px]">check_circle</span>
+              <span>Status</span>
+            </span>
+            <span className="text-[#286644] bg-[#dbeddb] px-2 py-0.5 rounded font-mono text-[12px] font-medium inline-block w-fit">
+              ● Live
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-1 sm:gap-4 items-start">
+            <span className="text-[rgba(55,53,47,0.55)] flex items-center gap-1.5 pt-0.5">
+              <span className="material-symbols-outlined text-[16px]">code</span>
+              <span>Tech Stack</span>
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {['Java', 'Spring Boot', 'REST APIs', 'PostgreSQL', 'Docker', 'Kong API Gateway', 'JWT', 'WebSocket'].map(t => (
+                <span key={t} className={`px-2 py-0.5 rounded text-[11px] font-medium ${getTechTagClass(t)}`}>
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-1 sm:gap-4 items-center">
+            <span className="text-[rgba(55,53,47,0.55)] flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px]">link</span>
+              <span>Links</span>
+            </span>
+            <div className="flex items-center gap-3">
+              <a 
+                href="https://github.com/SaikiranC08/InventoryHub" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-[#2383e2] hover:underline font-medium flex items-center gap-0.5 text-[12.5px]"
+              >
+                <span>Live Demo ↗</span>
+              </a>
+              <span className="text-[rgba(55,53,47,0.3)]">·</span>
+              <a 
+                href="https://github.com/SaikiranC08/InventoryHub" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-[#2383e2] hover:underline font-medium flex items-center gap-0.5 text-[12.5px]"
+              >
+                <span>GitHub Repository ↗</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* Architecture Visual Preview */}
+        <div className="rounded-lg border border-[#e9e9e7] overflow-hidden mb-8">
+          <div className="bg-[#f7f7f5] px-4 py-2 border-b border-[#e9e9e7] text-[12px] font-mono text-[rgba(55,53,47,0.5)] flex items-center justify-between">
+            <span>system-architecture.svg</span>
+            <span>Microservices Topology</span>
+          </div>
+          <InventoryHubArchitectureVisual />
+        </div>
+
+        {/* Detailed Engineering Content */}
+        <div className="space-y-8 text-[#37352f] text-[14.5px] leading-relaxed">
+          
+          {/* 1. Problem */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">🎯</span>
+              <span>1. Problem Statement</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)] mb-3">
+              Traditional inventory systems built as monolithic applications struggle when serving multi-tenant business operations. As multiple independent businesses share a centralized inventory infrastructure, monoliths create distinct failure points:
+            </p>
+            <ul className="list-disc list-inside space-y-1.5 text-[rgba(55,53,47,0.7)] ml-2 text-[14px]">
+              <li><strong className="text-[#37352f] font-medium">Tenant Data Leakage:</strong> Shared database tables without automated tenant-isolation filters risk exposing confidential inventory counts and business data.</li>
+              <li><strong className="text-[#37352f] font-medium">Concurrency Race Conditions:</strong> High-frequency simultaneous inventory allocations and inter-warehouse transfers cause phantom stock reads and double-allocation.</li>
+              <li><strong className="text-[#37352f] font-medium">Coupled Deployments:</strong> Modifying product catalog validation or stock transfer business logic requires rebuilding and redeploying the entire system.</li>
+            </ul>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 2. Solution */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">💡</span>
+              <span>2. Solution Overview</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)] mb-3">
+              InventoryHub solves these challenges through a resilient, decoupled microservices architecture designed with Java and Spring Boot:
+            </p>
+            <ul className="list-disc list-inside space-y-1.5 text-[rgba(55,53,47,0.7)] ml-2 text-[14px]">
+              <li><strong className="text-[#37352f] font-medium">Domain-Driven Microservices:</strong> Deconstructed autonomous services for Authentication &amp; Tenant Management, Product Catalog, and Stock Transfers.</li>
+              <li><strong className="text-[#37352f] font-medium">Centralized Kong Gateway:</strong> All ingress traffic is routed, rate-limited, and authenticated at the perimeter before hitting downstream services.</li>
+              <li><strong className="text-[#37352f] font-medium">Transactional Integrity:</strong> Strict ACID transaction boundaries ensure atomic stock deductions and multi-step transfer validation.</li>
+            </ul>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 3. Architecture */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">📐</span>
+              <span>3. System Architecture</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)] mb-3">
+              The platform implements a layered microservices pattern inside a containerized Docker network:
+            </p>
+            <div className="bg-[#fbfbfa] p-4 rounded-lg border border-[#e9e9e7] font-mono text-[12px] text-[#37352f] space-y-1 overflow-x-auto">
+              <div>[Client Apps] ──HTTPS──&gt; [Kong API Gateway (:8000)]</div>
+              <div className="text-[rgba(55,53,47,0.4)]">                         │  (Route matching, Rate Limiting, JWT Validation)</div>
+              <div className="text-[rgba(55,53,47,0.4)]">                         ▼</div>
+              <div>├──&gt; [Auth &amp; Tenant Service]     (:8081) ──&gt; PostgreSQL (tenants, users, roles)</div>
+              <div>├──&gt; [Product Catalog Service]    (:8082) ──&gt; PostgreSQL (categories, products, SKUs)</div>
+              <div>└──&gt; [Stock &amp; Transfer Service]   (:8083) ──&gt; PostgreSQL (warehouses, stocks, transfers)</div>
+            </div>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 4. Key Features */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">✨</span>
+              <span>4. Key Features</span>
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[13.5px]">
+              <div className="p-3.5 rounded border border-[#e9e9e7] bg-[#fbfbfa]">
+                <strong className="font-semibold block mb-1">Multi-Business Tenancy</strong>
+                <p className="text-[rgba(55,53,47,0.65)] text-[12.5px]">Strict data partitioning per business entity with custom tenant identifier propagation across every request context.</p>
+              </div>
+              <div className="p-3.5 rounded border border-[#e9e9e7] bg-[#fbfbfa]">
+                <strong className="font-semibold block mb-1">Product Catalog &amp; SKUs</strong>
+                <p className="text-[rgba(55,53,47,0.65)] text-[12.5px]">Hierarchical category structures, SKU code generation, variant management, and attribute tagging.</p>
+              </div>
+              <div className="p-3.5 rounded border border-[#e9e9e7] bg-[#fbfbfa]">
+                <strong className="font-semibold block mb-1">Stock Transfer Workflow</strong>
+                <p className="text-[rgba(55,53,47,0.65)] text-[12.5px]">State machine for inter-warehouse inventory movements: Draft → Requested → In Transit → Received / Rejected.</p>
+              </div>
+              <div className="p-3.5 rounded border border-[#e9e9e7] bg-[#fbfbfa]">
+                <strong className="font-semibold block mb-1">Audit Trail &amp; History</strong>
+                <p className="text-[rgba(55,53,47,0.65)] text-[12.5px]">Immutable logs of all stock allocations, transfers, and threshold adjustments with timestamped actor metadata.</p>
+              </div>
+            </div>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 5. Authentication & Security */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">🔒</span>
+              <span>5. Authentication &amp; Security</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)] mb-2">
+              Security is implemented with stateless authentication using Spring Security and JSON Web Tokens (JWT):
+            </p>
+            <ul className="list-disc list-inside space-y-1.5 text-[rgba(55,53,47,0.7)] ml-2 text-[14px]">
+              <li><strong className="text-[#37352f] font-medium">JWT Claims:</strong> Tokens encapsulate user ID, tenant ID, and granted authorities (`ROLE_ADMIN`, `ROLE_MANAGER`, `ROLE_STAFF`).</li>
+              <li><strong className="text-[#37352f] font-medium">Tenant Context Filter:</strong> A custom servlet filter intercepts incoming requests downstream of Kong, validates the tenant claim, and binds the tenant context to `ThreadLocal`.</li>
+              <li><strong className="text-[#37352f] font-medium">Password Hashing:</strong> BCrypt algorithm with configurable work factor for user credentials.</li>
+            </ul>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 6. API Design */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">📡</span>
+              <span>6. API Design &amp; Contracts</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)] mb-3">
+              RESTful APIs follow consistent semantic conventions, strict request validation, and standard HTTP response codes:
+            </p>
+            <div className="bg-[#fbfbfa] p-3.5 rounded border border-[#e9e9e7] font-mono text-[12px] space-y-2">
+              <div><span className="text-[#205d86] font-semibold">POST</span> /api/v1/auth/login <span className="text-[rgba(55,53,47,0.5)]">→ Authenticates user &amp; returns signed JWT</span></div>
+              <div><span className="text-[#286644] font-semibold">GET</span>  /api/v1/products?page=0&amp;size=20 <span className="text-[rgba(55,53,47,0.5)]">→ Paginated product catalog</span></div>
+              <div><span className="text-[#205d86] font-semibold">POST</span> /api/v1/inventory/transfers <span className="text-[rgba(55,53,47,0.5)]">→ Initiates atomic inter-warehouse transfer</span></div>
+              <div><span className="text-[#854c1d] font-semibold">PATCH</span>/api/v1/inventory/transfers/:id/status <span className="text-[rgba(55,53,47,0.5)]">→ Transitions transfer lifecycle state</span></div>
+            </div>
+            <p className="text-[13px] text-[rgba(55,53,47,0.65)] mt-2">
+              All payloads are validated using Jakarta Bean Validation (`@Valid`, `@NotNull`, `@Min`). Exceptions are caught by a global `@RestControllerAdvice` emitting uniform error envelopes with field-level details.
+            </p>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 7. WebSocket Communication */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">⚡</span>
+              <span>7. WebSocket Communication</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)]">
+              Integrated real-time STOMP over WebSocket channels to broadcast live stock deduction and replenishment events to connected client dashboards. When warehouse operators confirm an incoming stock transfer, inventory levels update across open sessions without requiring manual page reloads or polling.
+            </p>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 8. Kong API Gateway */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">🚪</span>
+              <span>8. Kong API Gateway</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)] mb-3">
+              Kong Gateway serves as the single reverse proxy ingress for the architecture:
+            </p>
+            <ul className="list-disc list-inside space-y-1.5 text-[rgba(55,53,47,0.7)] ml-2 text-[14px]">
+              <li><strong className="text-[#37352f] font-medium">Service Routing:</strong> Maps external paths to internal Docker DNS service endpoints.</li>
+              <li><strong className="text-[#37352f] font-medium">Rate Limiting:</strong> Enforces token bucket rate limiting (100 req/min per IP/API key) to protect against volumetric abuse.</li>
+              <li><strong className="text-[#37352f] font-medium">CORS &amp; Headers:</strong> Strips internal headers and standardizes cross-origin request policies.</li>
+            </ul>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 9. Database Design */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">🗄️</span>
+              <span>9. Database Design &amp; Data Modeling</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)] mb-3">
+              PostgreSQL stores relational entities with enforced foreign key integrity and transactional safety:
+            </p>
+            <ul className="list-disc list-inside space-y-1.5 text-[rgba(55,53,47,0.7)] ml-2 text-[14px]">
+              <li><strong className="text-[#37352f] font-medium">Tenant Partitioning:</strong> Every relational entity has a dedicated indexed `tenant_id` column ensuring zero cross-tenant query leaks.</li>
+              <li><strong className="text-[#37352f] font-medium">Locking Strategies:</strong> Uses pessimistic write locks (`SELECT ... FOR UPDATE`) during stock transfer execution to prevent inventory races.</li>
+              <li><strong className="text-[#37352f] font-medium">Audit Tables:</strong> Temporal tables log historical stock delta transactions with timestamps and previous balances.</li>
+            </ul>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 10. Docker & Deployment */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">🐳</span>
+              <span>10. Docker Containerization &amp; Deployment</span>
+            </h2>
+            <p className="text-[rgba(55,53,47,0.75)] mb-3">
+              The entire application topology is containerized for seamless local execution and production parity:
+            </p>
+            <ul className="list-disc list-inside space-y-1.5 text-[rgba(55,53,47,0.7)] ml-2 text-[14px]">
+              <li><strong className="text-[#37352f] font-medium">Multi-Stage Dockerfiles:</strong> Maven build stage separated from lightweight Eclipse Temurin JRE runtime images.</li>
+              <li><strong className="text-[#37352f] font-medium">Docker Compose:</strong> Orchestrates the Kong Gateway, PostgreSQL database instance, and all Spring Boot services within an isolated bridge network.</li>
+              <li><strong className="text-[#37352f] font-medium">Health Checks:</strong> Built-in Spring Boot Actuator `/actuator/health` probes ensure services are fully initialized before traffic is routed.</li>
+            </ul>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 11. Testing */}
+          <section>
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-2 flex items-center gap-2">
+              <span className="text-[16px]">🧪</span>
+              <span>11. Testing &amp; Quality Assurance</span>
+            </h2>
+            <ul className="list-disc list-inside space-y-1.5 text-[rgba(55,53,47,0.7)] ml-2 text-[14px]">
+              <li><strong className="text-[#37352f] font-medium">Unit Testing:</strong> JUnit 5 and Mockito test business logic in service classes, state machines, and validation rules.</li>
+              <li><strong className="text-[#37352f] font-medium">Integration Testing:</strong> MockMvc tests HTTP status codes, JSON serialization, and Spring Security authorization filters.</li>
+              <li><strong className="text-[#37352f] font-medium">API Testing:</strong> Postman test collections verify full end-to-end multi-tenant workflows through the Kong gateway.</li>
+            </ul>
+          </section>
+
+          <hr className="border-[#e9e9e7]" />
+
+          {/* 12. Links & Actions */}
+          <section className="pt-2">
+            <h2 className="text-[19px] font-bold text-[#37352f] mb-3 flex items-center gap-2">
+              <span className="text-[16px]">🔗</span>
+              <span>12. Project Links</span>
+            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <a 
+                href="https://github.com/SaikiranC08/InventoryHub" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="px-4 py-2 rounded-lg bg-[#2383e2] hover:bg-[#1a70c5] text-white font-medium text-[13px] flex items-center gap-1.5 transition-colors shadow-sm"
+              >
+                <span>Live Demo</span>
+                <span className="material-symbols-outlined text-[15px]">open_in_new</span>
+              </a>
+              <a 
+                href="https://github.com/SaikiranC08/InventoryHub" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="px-4 py-2 rounded-lg border border-[#e9e9e7] bg-white hover:bg-[#f7f7f5] text-[#37352f] font-medium text-[13px] flex items-center gap-1.5 transition-colors"
+              >
+                <span>GitHub Repository</span>
+                <span className="material-symbols-outlined text-[15px]">open_in_new</span>
+              </a>
+              <button 
+                onClick={() => onNavigate('portfolio', 'projects')}
+                className="px-4 py-2 rounded-lg border border-transparent hover:bg-[rgba(55,53,47,0.06)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] text-[13px] transition-colors"
+              >
+                ← Back to Featured Projects
+              </button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
   );
 }
 
@@ -437,11 +1086,12 @@ function TechGlobe({ activeFilter }) {
 const SEARCH_ITEMS = [
   // Projects
   {
-    title: 'InventoryHub (Inventory Management System)',
+    title: 'InventoryHub',
     category: 'Project',
     catColor: 'bg-[#fadec9] text-[#854c1d]',
-    desc: 'Microservices architecture, Java, Spring Boot, PostgreSQL, Docker, Kong API GW',
-    target: 'projects'
+    desc: 'Multi-Business Inventory Management Platform · Java, Spring Boot, PostgreSQL, Docker, Kong API GW',
+    target: 'projects',
+    page: 'inventoryhub'
   },
   {
     title: 'Expense Tracker',
@@ -572,7 +1222,7 @@ const SEARCH_ITEMS = [
     title: 'B.E. Computer Science & Design',
     category: 'Education',
     catColor: 'bg-[#d3e5ef] text-[#205d86]',
-    desc: 'NHITM · Mumbai University (2022–2026), DSA, DBMS, OS, Networks',
+    desc: 'NHITM · Mumbai University (2022–2026) · CGPA: 8.0/10 · DSA, DBMS, OS, Networks',
     target: 'education'
   },
   // Fast-Track / Contact
@@ -587,7 +1237,7 @@ const SEARCH_ITEMS = [
     title: 'Get In Touch / Contact',
     category: 'Contact',
     catColor: 'bg-[#edf3f8] text-[#205d86]',
-    desc: 'Direct email and professional connection channels',
+    desc: 'schevula26@gmail.com · Direct email and professional connection channels',
     target: 'contact'
   }
 ];
@@ -600,8 +1250,26 @@ function Sidebar({
   onToggleCollapse, 
   onOpenSearch, 
   activePage, 
+  activeSection = 'about',
   onNavigate 
 }) {
+  const isSectionActive = (sectionId) => {
+    if (activePage !== 'portfolio') return false;
+    if (sectionId === 'about') {
+      return activeSection === 'about' || !activeSection;
+    }
+    return activeSection === sectionId;
+  };
+
+  const getNavItemClass = (sectionId) => {
+    const active = isSectionActive(sectionId);
+    const layout = collapsed ? 'justify-center p-2' : 'gap-2 px-2 py-1';
+    const state = active
+      ? 'bg-[rgba(55,53,47,0.08)] font-semibold text-[#37352f]'
+      : 'hover:bg-[rgba(55,53,47,0.06)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] font-normal';
+    return `flex items-center rounded transition-colors ${layout} ${state}`;
+  };
+
   return (
     <>
       {/* Mobile Drawer Backdrop */}
@@ -616,9 +1284,9 @@ function Sidebar({
       {/* Sticky / Fixed Global Sidebar */}
       <aside
         className={`bg-[#f7f7f5] border-r border-[#e9e9e7] flex flex-col justify-between select-none z-40 transition-all duration-200 ease-in-out
-          fixed inset-y-0 left-0 h-screen md:static
+          fixed inset-y-0 left-0 h-screen md:static shadow-xl md:shadow-none
           ${open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-          ${collapsed ? 'md:w-[56px] w-[240px]' : 'w-[240px] shrink-0'}
+          ${collapsed ? 'md:w-[56px] w-[270px] max-w-[82vw]' : 'w-[270px] max-w-[82vw] md:w-[240px] shrink-0'}
         `}
       >
         {/* Top & Navigation Area with independent scrolling */}
@@ -626,19 +1294,19 @@ function Sidebar({
           
           {/* Header row */}
           {collapsed ? (
-            /* Collapsed Header: Expand Icon button */
+            /* Collapsed Header: ONLY Single Toggle Icon (›) */
             <div className="flex flex-col items-center mb-3">
               <button
                 onClick={onToggleCollapse}
-                className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] transition-colors"
+                className="w-9 h-9 flex items-center justify-center rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] transition-colors"
                 title="Expand sidebar"
                 aria-label="Expand sidebar"
               >
-                <span className="material-symbols-outlined text-[20px]">keyboard_double_arrow_right</span>
+                <span className="material-symbols-outlined text-[18px]">chevron_right</span>
               </button>
             </div>
           ) : (
-            /* Expanded Header: Workspace title + collapse icon */
+            /* Expanded Header: Workspace title + single collapse chevron (‹) */
             <div className="flex items-center justify-between p-1.5 rounded hover:bg-[rgba(55,53,47,0.08)] cursor-pointer text-[#37352f] text-[14px] font-semibold mb-2">
               <div 
                 className="flex items-center gap-2 overflow-hidden flex-1"
@@ -658,7 +1326,7 @@ function Sidebar({
                 title="Collapse sidebar"
                 aria-label="Collapse sidebar"
               >
-                <span className="material-symbols-outlined text-[18px]">keyboard_double_arrow_left</span>
+                <span className="material-symbols-outlined text-[18px]">chevron_left</span>
               </button>
               <button
                 onClick={onToggle}
@@ -674,32 +1342,32 @@ function Sidebar({
           {/* Quick Actions (Search & Updates) */}
           <div className="space-y-0.5 text-[13px] text-[#37352f]">
             <button 
-              className={`w-full flex items-center rounded hover:bg-[rgba(55,53,47,0.08)] text-left transition-colors ${
+              className={`w-full flex items-center rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] transition-colors text-left ${
                 collapsed ? 'justify-center p-2' : 'gap-2.5 px-2 py-1'
               }`}
               onClick={onOpenSearch}
-              title="Search portfolio (⌘K)"
-              aria-label="Search"
+              title="Search (⌘K)"
+              aria-label="Search portfolio"
             >
-              <span className="material-symbols-outlined text-[18px] text-[rgba(55,53,47,0.45)] shrink-0">search</span>
+              <span className="material-symbols-outlined text-[18px]">search</span>
               {!collapsed && (
-                <>
+                <div className="flex-1 flex items-center justify-between">
                   <span>Search</span>
-                  <span className="ml-auto text-[10px] text-[rgba(55,53,47,0.45)] font-mono bg-white border border-[#e9e9e7] px-1 rounded">⌘K</span>
-                </>
+                  <kbd className="text-[10px] font-mono text-[rgba(55,53,47,0.4)] border border-[#e9e9e7] px-1 py-0.2 rounded bg-white">⌘K</kbd>
+                </div>
               )}
             </button>
             <button 
-              className={`w-full flex items-center rounded text-left transition-colors ${
+              className={`w-full flex items-center rounded transition-colors text-left ${
                 collapsed ? 'justify-center p-2' : 'gap-2.5 px-2 py-1'
               } ${
-                activePage === 'updates' ? 'bg-[rgba(55,53,47,0.08)] font-medium text-[#37352f]' : 'hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f]'
+                activePage === 'updates' ? 'bg-[rgba(55,53,47,0.08)] font-semibold text-[#37352f]' : 'hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f]'
               }`}
               onClick={() => onNavigate('updates')}
               title="Updates"
-              aria-label="Updates"
+              aria-label="View changelog updates"
             >
-              <span className="material-symbols-outlined text-[18px] text-[rgba(55,53,47,0.45)] shrink-0">update</span>
+              <span className="material-symbols-outlined text-[18px]">update</span>
               {!collapsed && <span>Updates</span>}
             </button>
           </div>
@@ -707,7 +1375,7 @@ function Sidebar({
           {/* Divider in collapsed mode */}
           {collapsed && <div className="my-3 border-t border-[#e9e9e7]" />}
 
-          {/* Workspace Pages */}
+          {/* Workspace Pages (Main sections) */}
           <div className="mt-4">
             {!collapsed && (
               <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-[rgba(55,53,47,0.45)]">
@@ -716,11 +1384,7 @@ function Sidebar({
             )}
             <nav className="mt-1 space-y-0.5 text-[13px] text-[#37352f]">
               <a 
-                className={`flex items-center rounded transition-colors ${
-                  collapsed ? 'justify-center p-2' : 'gap-2 px-2 py-1'
-                } ${
-                  activePage === 'portfolio' ? 'bg-[rgba(55,53,47,0.06)] font-medium text-[#37352f]' : 'hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f]'
-                }`} 
+                className={getNavItemClass('about')} 
                 href="#about"
                 onClick={(e) => {
                   e.preventDefault();
@@ -733,9 +1397,7 @@ function Sidebar({
                 {!collapsed && <span className="truncate">Developer Portfolio</span>}
               </a>
               <a 
-                className={`flex items-center rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] transition-colors ${
-                  collapsed ? 'justify-center p-2' : 'gap-2 px-2 py-1'
-                }`} 
+                className={getNavItemClass('projects')} 
                 href="#projects"
                 onClick={(e) => {
                   e.preventDefault();
@@ -748,9 +1410,7 @@ function Sidebar({
                 {!collapsed && <span className="truncate">Projects Gallery</span>}
               </a>
               <a 
-                className={`flex items-center rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] transition-colors ${
-                  collapsed ? 'justify-center p-2' : 'gap-2 px-2 py-1'
-                }`} 
+                className={getNavItemClass('experience')} 
                 href="#experience"
                 onClick={(e) => {
                   e.preventDefault();
@@ -763,9 +1423,7 @@ function Sidebar({
                 {!collapsed && <span className="truncate">Engineering Experience</span>}
               </a>
               <a 
-                className={`flex items-center rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] transition-colors ${
-                  collapsed ? 'justify-center p-2' : 'gap-2 px-2 py-1'
-                }`} 
+                className={getNavItemClass('skills')} 
                 href="#skills"
                 onClick={(e) => {
                   e.preventDefault();
@@ -778,9 +1436,7 @@ function Sidebar({
                 {!collapsed && <span className="truncate">Technical Stack</span>}
               </a>
               <a 
-                className={`flex items-center rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] transition-colors ${
-                  collapsed ? 'justify-center p-2' : 'gap-2 px-2 py-1'
-                }`} 
+                className={getNavItemClass('education')} 
                 href="#education"
                 onClick={(e) => {
                   e.preventDefault();
@@ -793,9 +1449,7 @@ function Sidebar({
                 {!collapsed && <span className="truncate">Education</span>}
               </a>
               <a 
-                className={`flex items-center rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] hover:text-[#37352f] transition-colors ${
-                  collapsed ? 'justify-center p-2' : 'gap-2 px-2 py-1'
-                }`} 
+                className={getNavItemClass('contact')} 
                 href="#contact"
                 onClick={(e) => {
                   e.preventDefault();
@@ -903,6 +1557,47 @@ function Sidebar({
 
 /* ─── Main App ─── */
 export default function App() {
+  // Theme state: 'light' | 'dark'
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem('portfolio_theme');
+      if (saved === 'dark' || saved === 'light') return saved;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      document.documentElement.setAttribute('data-theme', theme);
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      localStorage.setItem('portfolio_theme', theme);
+    } catch {}
+  }, [theme]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e) => {
+      try {
+        const saved = localStorage.getItem('portfolio_theme');
+        if (!saved) {
+          setTheme(e.matches ? 'dark' : 'light');
+        }
+      } catch {}
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toastVisible, setToastVisible] = useState(false);
@@ -1068,18 +1763,66 @@ export default function App() {
     }
   };
 
+  const [activeSection, setActiveSection] = useState('about');
+  const mainScrollRef = useRef(null);
+
+  useEffect(() => {
+    if (activePage !== 'portfolio') return;
+    const mainEl = mainScrollRef.current || document.querySelector('main');
+    if (!mainEl) return;
+
+    const sectionIds = ['about', 'projects', 'experience', 'skills', 'education', 'contact'];
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.target.id) {
+            setActiveSection(entry.target.id);
+          }
+        });
+      },
+      {
+        root: mainEl,
+        rootMargin: '-15% 0px -55% 0px',
+        threshold: 0,
+      }
+    );
+
+    sectionIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+
+    const handleScroll = () => {
+      if (mainEl.scrollTop < 60) {
+        setActiveSection('about');
+      } else if (mainEl.scrollHeight - mainEl.scrollTop - mainEl.clientHeight < 60) {
+        setActiveSection('contact');
+      }
+    };
+
+    mainEl.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      mainEl.removeEventListener('scroll', handleScroll);
+    };
+  }, [activePage]);
+
   const handleNavigate = (page, targetId) => {
     setActivePage(page);
     setSidebarOpen(false);
     if (targetId) {
+      setActiveSection(targetId);
       setTimeout(() => {
         const el = document.getElementById(targetId);
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth' });
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       }, 50);
     } else if (page === 'portfolio') {
-      const mainEl = document.querySelector('main');
+      setActiveSection('about');
+      const mainEl = mainScrollRef.current || document.querySelector('main');
       if (mainEl) {
         mainEl.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
@@ -1107,6 +1850,7 @@ export default function App() {
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         onOpenSearch={() => setSearchOpen(true)}
         activePage={activePage}
+        activeSection={activeSection}
         onNavigate={handleNavigate}
       />
 
@@ -1117,49 +1861,59 @@ export default function App() {
         <header className="h-11 shrink-0 border-b border-[#e9e9e7] bg-white/95 backdrop-blur z-20 px-4 flex items-center justify-between text-[13px] text-[#37352f]">
           <div className="flex items-center gap-1.5 overflow-hidden">
             <button 
-              className="p-1 rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] md:hidden mr-1" 
+              className="p-1 rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] md:hidden mr-1 shrink-0" 
               onClick={() => setSidebarOpen(!sidebarOpen)}
               aria-label="Toggle navigation menu"
             >
               <span className="material-symbols-outlined text-[18px]">menu</span>
             </button>
-            {sidebarCollapsed && (
-              <button
-                className="hidden md:flex p-1 rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.65)] mr-1"
-                onClick={() => setSidebarCollapsed(false)}
-                title="Expand sidebar"
-                aria-label="Expand sidebar"
-              >
-                <span className="material-symbols-outlined text-[18px]">keyboard_double_arrow_right</span>
-              </button>
-            )}
             <span 
-              className="text-[rgba(55,53,47,0.65)] hover:underline cursor-pointer truncate"
+              className="hidden sm:inline text-[rgba(55,53,47,0.65)] hover:underline cursor-pointer truncate"
               onClick={() => handleNavigate('portfolio')}
             >
               Saikiran's Workspace
             </span>
-            <span className="text-[rgba(55,53,47,0.45)]">/</span>
-            <span 
-              className="font-medium text-[#37352f] truncate cursor-pointer hover:underline"
-              onClick={() => handleNavigate(activePage)}
-            >
-              {activePage === 'updates' ? 'Updates' : 'Developer Portfolio'}
-            </span>
+            <span className="hidden sm:inline text-[rgba(55,53,47,0.45)]">/</span>
+            {activePage === 'inventoryhub' ? (
+              <>
+                <span 
+                  className="hidden md:inline text-[rgba(55,53,47,0.65)] hover:underline cursor-pointer truncate"
+                  onClick={() => handleNavigate('portfolio', 'projects')}
+                >
+                  Developer Portfolio
+                </span>
+                <span className="hidden md:inline text-[rgba(55,53,47,0.45)]">/</span>
+                <span 
+                  className="font-medium text-[#37352f] truncate cursor-pointer hover:underline"
+                  onClick={() => handleNavigate('inventoryhub')}
+                >
+                  InventoryHub
+                </span>
+              </>
+            ) : (
+              <span 
+                className="font-medium text-[#37352f] truncate cursor-pointer hover:underline"
+                onClick={() => handleNavigate(activePage)}
+              >
+                {activePage === 'updates' ? 'Updates' : 'Developer Portfolio'}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1 shrink-0 text-[rgba(55,53,47,0.65)]">
             <button 
-              className="px-2 py-1 rounded hover:bg-[rgba(55,53,47,0.08)] flex items-center gap-1 text-[12px]"
+              className="px-1.5 sm:px-2 py-1 rounded hover:bg-[rgba(55,53,47,0.08)] flex items-center gap-1 text-[12px]"
               onClick={() => setSearchOpen(true)}
               title="Search portfolio (⌘K)"
+              aria-label="Search portfolio"
             >
               <span className="material-symbols-outlined text-[15px]">search</span>
               <span className="hidden sm:inline">Search</span>
             </button>
             <button 
-              className="px-2 py-1 rounded hover:bg-[rgba(55,53,47,0.08)] flex items-center gap-1 text-[12px] transition-colors"
+              className="px-1.5 sm:px-2 py-1 rounded hover:bg-[rgba(55,53,47,0.08)] flex items-center gap-1 text-[12px] transition-colors"
               onClick={handleShare}
               title="Share portfolio link"
+              aria-label="Share portfolio link"
             >
               Share
             </button>
@@ -1216,13 +1970,25 @@ export default function App() {
               )}
             </div>
 
+            {/* Theme Toggle Button */}
+            <button
+              onClick={toggleTheme}
+              className="h-7 w-7 rounded flex items-center justify-center text-[rgba(55,53,47,0.65)] hover:text-[#37352f] hover:bg-[rgba(55,53,47,0.08)] transition-colors select-none"
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              <span className="material-symbols-outlined text-[17px] leading-none">
+                {theme === 'dark' ? 'light_mode' : 'dark_mode'}
+              </span>
+            </button>
+
           </div>
         </header>
 
         {/* VIEW CONDITIONAL: UPDATES PAGE VS PORTFOLIO */}
         {activePage === 'updates' ? (
           <main className="w-full overflow-y-auto pb-28">
-            <div className="max-w-[760px] mx-auto px-6 sm:px-12 py-10 sm:py-14">
+            <div className="max-w-[760px] mx-auto px-4 sm:px-12 py-8 sm:py-14">
               
               {/* Back to portfolio */}
               <div className="mb-6">
@@ -1345,46 +2111,54 @@ export default function App() {
               </footer>
             </div>
           </main>
+        ) : activePage === 'inventoryhub' ? (
+          <InventoryHubDetailPage onNavigate={handleNavigate} />
         ) : (
           /* MAIN PORTFOLIO DOCUMENT */
-          <main className="w-full overflow-y-auto pb-28">
+          <main ref={mainScrollRef} className="w-full overflow-y-auto pb-28 scroll-smooth">
           
           {/* INITIAL / HERO VIEWPORT */}
-          <section id="about" className="min-h-[calc(100vh-44px)] flex flex-col items-center justify-center py-12 sm:py-16 px-6 sm:px-12 text-center select-none">
+          <section id="about" className="min-h-[calc(100vh-44px)] min-h-[calc(100dvh-44px)] flex flex-col items-center justify-center py-6 sm:py-10 px-4 sm:px-12 text-center select-none">
             
-            {/* 1. MINIMAL CIRCULAR AVATAR */}
-            <div className={`mb-4 inline-block ${hasAnimated ? '' : 'hero-anim-1'}`}>
-              <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-[#f7f7f5] border border-[#e2e2df] flex items-center justify-center text-[22px] sm:text-[24px] font-semibold text-[#37352f] tracking-tight shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-                SC
+            {/* 1. MINIMAL CIRCULAR AVATAR / PROFILE */}
+            <div className={`mb-3.5 sm:mb-4 inline-block ${hasAnimated ? '' : 'hero-anim-1'}`}>
+              <div className="w-[116px] h-[116px] sm:w-[136px] sm:h-[136px] rounded-full bg-[#f7f7f5] border border-[#e2e2df] p-1 overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,0.08)] select-none flex items-center justify-center">
+                <img 
+                  src="/protofilo_Image.png" 
+                  alt="Saikiran Chevula" 
+                  className="w-full h-full object-cover rounded-full"
+                  loading="eager"
+                  decoding="async"
+                />
               </div>
             </div>
 
             {/* 2. NAME */}
-            <h1 className={`text-[32px] sm:text-[42px] font-bold text-[#37352f] tracking-tight leading-tight mb-2 ${hasAnimated ? '' : 'hero-anim-2'}`}>
+            <h1 className={`text-[30px] sm:text-[44px] font-bold text-[#37352f] tracking-tight leading-tight mb-1 ${hasAnimated ? '' : 'hero-anim-2'}`}>
               Saikiran Chevula
             </h1>
 
             {/* 3. PROFESSIONAL IDENTITY */}
-            <p className={`text-[17px] sm:text-[19px] font-medium text-[#37352f] mb-1 ${hasAnimated ? '' : 'hero-anim-3'}`}>
+            <p className={`text-[17px] sm:text-[20px] font-medium text-[#37352f] mb-1 ${hasAnimated ? '' : 'hero-anim-3'}`}>
               Software Developer
             </p>
 
             {/* 4. SHORT TECHNICAL IDENTITY */}
-            <p className={`text-[14px] sm:text-[15px] text-[rgba(55,53,47,0.55)] font-normal mb-2 ${hasAnimated ? '' : 'hero-anim-4'}`}>
+            <p className={`text-[13.5px] sm:text-[15px] text-[rgba(55,53,47,0.55)] font-normal mb-1.5 max-w-[340px] sm:max-w-none mx-auto ${hasAnimated ? '' : 'hero-anim-4'}`}>
               Java · Spring Boot · Backend &amp; Full-Stack
             </p>
 
             {/* 5. DOTTED ARROW */}
-            <div className={`flex justify-center text-[rgba(55,53,47,0.35)] my-2 ${hasAnimated ? '' : 'hero-anim-5'}`}>
-              <svg width="36" height="52" viewBox="0 0 36 52" fill="none" xmlns="http://www.w3.org/2000/svg" className="overflow-visible">
-                <path d="M14 2 C14 18, 18 28, 22 40" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3.5" strokeLinecap="round" />
-                <path d="M16 36 L23 43 L25 34" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <div className={`flex justify-center text-[rgba(55,53,47,0.45)] my-1 sm:my-2 ${hasAnimated ? '' : 'hero-anim-5'}`}>
+              <svg width="40" height="54" viewBox="0 0 36 52" fill="none" xmlns="http://www.w3.org/2000/svg" className="overflow-visible max-w-full hero-arrow-animated">
+                <path className="hero-arrow-path" d="M14 2 C14 18, 18 28, 22 40" stroke="currentColor" strokeWidth="1.8" strokeDasharray="4 4" strokeLinecap="round" />
+                <path d="M16 36 L23 43 L25 34" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
 
             {/* 6 & 7. WHO I AM SECTION */}
-            <div className="w-full max-w-[480px] rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] p-4 sm:p-5 text-center shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-              <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-[rgba(55,53,47,0.05)] text-[11px] font-semibold text-[rgba(55,53,47,0.6)] uppercase tracking-wider mb-2 font-mono ${hasAnimated ? '' : 'hero-anim-6'}`}>
+            <div className="w-full max-w-[540px] rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] p-4 sm:p-5 text-center shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+              <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-[rgba(55,53,47,0.05)] text-[11px] font-semibold text-[rgba(55,53,47,0.6)] uppercase tracking-wider mb-1.5 font-mono ${hasAnimated ? '' : 'hero-anim-6'}`}>
                 Who I Am
               </div>
               <p className={`text-[14px] sm:text-[15px] text-[#37352f] leading-relaxed font-normal ${hasAnimated ? '' : 'hero-anim-7'}`}>
@@ -1395,13 +2169,13 @@ export default function App() {
             {/* 8. SUBTLE SCROLL CUE */}
             <a 
               href="#projects" 
-              className={`mt-10 sm:mt-14 flex flex-col items-center gap-1 text-[rgba(55,53,47,0.35)] hover:text-[#37352f] transition-colors cursor-pointer group ${hasAnimated ? '' : 'hero-anim-8'}`}
+              className={`mt-6 sm:mt-8 flex flex-col items-center gap-1 text-[rgba(55,53,47,0.45)] hover:text-[#37352f] transition-colors cursor-pointer group ${hasAnimated ? '' : 'hero-anim-8'}`}
               aria-label="Explore Projects"
             >
-              <div className="flex flex-col items-center gap-1">
-                <span className="w-1 h-1 rounded-full bg-current opacity-40"></span>
-                <span className="w-1 h-1 rounded-full bg-current opacity-70"></span>
-                <span className="material-symbols-outlined text-[16px] group-hover:translate-y-0.5 transition-transform">
+              <div className="flex flex-col items-center gap-1 scroll-cue-animated">
+                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-40"></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70"></span>
+                <span className="material-symbols-outlined text-[22px] leading-none transition-transform group-hover:translate-y-1">
                   arrow_downward
                 </span>
               </div>
@@ -1412,175 +2186,295 @@ export default function App() {
           </section>
 
           {/* MAIN WORKSPACE CONTENT (Revealed on Scroll) */}
-          <div className="max-w-[920px] mx-auto px-6 sm:px-12">
+          <div className="max-w-[920px] mx-auto px-4 sm:px-12">
 
             {/* ───────── PROJECTS SECTION ───────── */}
-            <section className="my-8" id="projects">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                <div className="flex items-center gap-2">
+            <section className="py-10 sm:py-16 md:py-20 scroll-mt-4 sm:scroll-mt-6" id="projects">
+              {/* Section Header & Subtitle */}
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-1">
                   <span className="text-[18px]">🗂️</span>
-                  <h2 className="text-[20px] font-bold text-[#37352f]">Featured Projects &amp; Systems</h2>
-                  <span className="text-[12px] bg-[#f1f1ef] text-[rgba(55,53,47,0.45)] px-2 py-0.5 rounded font-mono">1 item</span>
+                  <h2 className="text-[20px] font-bold text-[#37352f]">Featured Projects</h2>
                 </div>
-                <div className="flex items-center gap-1.5 text-[12px] text-[rgba(55,53,47,0.65)]">
-                  <button className="px-2 py-1 rounded hover:bg-[rgba(55,53,47,0.08)] flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[15px]">filter_list</span><span>Filter</span>
-                  </button>
-                  <button className="px-2 py-1 rounded hover:bg-[rgba(55,53,47,0.08)] flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[15px]">swap_vert</span><span>Sort</span>
-                  </button>
-                  <button className="px-2 py-1 rounded hover:bg-[rgba(55,53,47,0.08)] flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[15px]">search</span>
-                  </button>
-                  <button className="px-2.5 py-1 rounded bg-[#2383e2] hover:bg-[#1a70c5] text-white font-medium flex items-center gap-1">
-                    <span>+ New</span>
-                  </button>
+                <p className="text-[13px] text-[rgba(55,53,47,0.65)]">
+                  Selected systems I&apos;ve designed and built.
+                </p>
+              </div>
+
+              {/* Curated Gallery View Indicator */}
+              <div className="flex items-center border-b border-[#e9e9e7] mb-6 text-[13px]">
+                <div className="flex items-center gap-1.5 py-2 font-medium text-[#37352f] border-b-2 border-[#37352f] -mb-[1px]">
+                  <span className="material-symbols-outlined text-[16px]">grid_view</span>
+                  <span>Gallery View</span>
                 </div>
               </div>
 
-              {/* View Tabs */}
-              <div className="flex items-center gap-4 border-b border-[#e9e9e7] mb-6 text-[13px]">
-                <button className="flex items-center gap-1.5 py-2 font-medium text-[#37352f] border-b-2 border-[#37352f] -mb-[1px]">
-                  <span className="material-symbols-outlined text-[16px]">grid_view</span><span>Gallery View</span>
-                </button>
-                <button className="flex items-center gap-1.5 py-2 text-[rgba(55,53,47,0.45)] hover:text-[#37352f]">
-                  <span className="material-symbols-outlined text-[16px]">table_rows</span><span>Table</span>
-                </button>
-                <button className="flex items-center gap-1.5 py-2 text-[rgba(55,53,47,0.45)] hover:text-[#37352f]">
-                  <span className="material-symbols-outlined text-[16px]">view_kanban</span><span>Board</span>
-                </button>
-              </div>
+              {/* Gallery Grid (Dynamically balances single or multiple projects) */}
+              <div className={PROJECTS.length === 1 ? "max-w-[720px] mx-auto w-full" : "grid grid-cols-1 md:grid-cols-2 gap-5"}>
+                {PROJECTS.map((project) => (
+                  <div
+                    key={project.id}
+                    onClick={() => handleNavigate(project.id)}
+                    className="group rounded-lg border border-[#e9e9e7] bg-white hover:border-[#d0d0cc] hover:-translate-y-[2px] hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] transition-all duration-200 overflow-hidden flex flex-col cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleNavigate(project.id);
+                      }
+                    }}
+                  >
+                    {/* PROJECT VISUAL / PREVIEW */}
+                    <div className="w-full bg-[#fbfbfa] border-b border-[#e9e9e7] overflow-hidden select-none relative">
+                      {project.image ? (
+                        <img 
+                          src={project.image} 
+                          alt={project.imageAlt || `${project.name} preview`} 
+                          className="w-full h-40 sm:h-44 object-cover object-top"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const fallback = e.currentTarget.nextElementSibling;
+                            if (fallback) fallback.style.display = 'block';
+                          }}
+                        />
+                      ) : null}
+                      <div style={{ display: project.image ? 'none' : 'block' }}>
+                        {project.visual || <InventoryHubProductVisual />}
+                      </div>
+                    </div>
 
-              {/* Gallery Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                
-                {/* CARD 1: Inventory Management System */}
-                <div className="group rounded-lg border border-[#e9e9e7] bg-white hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] hover:border-[#d0d0cc] transition-all overflow-hidden flex flex-col cursor-pointer">
-                  <div className="h-40 bg-[#f7f7f5] overflow-hidden relative border-b border-[#e9e9e7] flex items-center justify-center">
-                    <div className="text-center">
-                      <span className="material-symbols-outlined text-[48px] text-[rgba(55,53,47,0.25)]">inventory_2</span>
-                      <div className="text-[12px] text-[rgba(55,53,47,0.45)] mt-1 font-mono">Microservices Architecture</div>
-                    </div>
-                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1">
-                      <span className="bg-white/95 backdrop-blur px-2 py-0.5 rounded text-[11px] font-mono text-[#37352f] shadow-sm border border-[#e9e9e7]">
-                        🔧 Backend
-                      </span>
-                    </div>
-                  </div>
-                  <div className="p-4 flex-1 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <span className="text-[16px]">🏗️</span>
-                        <h3 className="font-bold text-[15px] text-[#37352f] group-hover:text-[#2383e2] transition-colors">
-                          Inventory Management System
+                    {/* CARD DETAILS */}
+                    <div className="p-4 sm:p-5 flex-1 flex flex-col justify-between">
+                      <div>
+                        {/* Category + Status */}
+                        <div className="flex items-center justify-between gap-2 mb-2.5">
+                          <span className="text-[11px] font-mono font-medium text-[rgba(55,53,47,0.65)] bg-[#f1f1ef] px-2 py-0.5 rounded border border-[#e9e9e7]">
+                            {project.category}
+                          </span>
+                          <span className="text-[11px] font-mono font-medium text-[#286644] bg-[#dbeddb] px-2 py-0.5 rounded flex items-center gap-1">
+                            {project.status}
+                          </span>
+                        </div>
+
+                        {/* Project Title */}
+                        <h3 className="font-bold text-[17px] text-[#37352f] group-hover:text-[#2383e2] transition-colors leading-snug">
+                          {project.name}
                         </h3>
+
+                        {/* Subtitle */}
+                        <p className="text-[13px] font-medium text-[rgba(55,53,47,0.7)] mt-0.5 mb-2.5">
+                          {project.subtitle}
+                        </p>
+
+                        {/* Short Description */}
+                        <p className="text-[13px] text-[rgba(55,53,47,0.65)] leading-relaxed mb-3.5">
+                          {project.description}
+                        </p>
+
+                        {/* Technology Tags (Subtle tinted Notion pills) */}
+                        <div className="flex flex-wrap gap-1.5 mb-4">
+                          {project.technologies.map((tech) => (
+                            <span 
+                              key={tech} 
+                              className={`px-2 py-0.5 rounded text-[11px] font-medium ${getTechTagClass(tech)}`}
+                            >
+                              {tech}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-1.5 mb-2.5">
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#fadec9] text-[#854c1d]">Java</span>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#d3e5ef] text-[#205d86]">Spring Boot</span>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#dbeddb] text-[#286644]">REST APIs</span>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#e8deee] text-[#5c3882]">PostgreSQL</span>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#e3e2e0] text-[#32302c]">Docker</span>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#fdecc8] text-[#8f632d]">Kong API GW</span>
-                      </div>
-                      <p className="text-[13px] text-[rgba(55,53,47,0.65)] leading-relaxed mb-3">
-                        A microservices-based inventory management system designed to manage products, inventory, and business operations through secure REST APIs. Features authentication, authorization, and Dockerized services.
-                      </p>
-                    </div>
-                    <div className="pt-3 border-t border-[#f1f1ef] flex items-center justify-between text-[12px]">
-                      <span className="font-mono text-[rgba(55,53,47,0.45)] text-[11px]">Java · Spring Boot · PostgreSQL</span>
-                      <div className="flex items-center gap-2 text-[rgba(55,53,47,0.65)]">
-                        <a 
-                          href="https://github.com/SaikiranC08" 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="text-[11px] hover:text-[#37352f] hover:underline flex items-center gap-0.5"
-                        >
-                          GitHub ↗
-                        </a>
+
+                      {/* Divider & Text Links */}
+                      <div className="pt-3 border-t border-[#f1f1ef] flex items-center justify-between text-[12px] flex-wrap gap-2">
+                        <div className="flex items-center gap-4 text-[rgba(55,53,47,0.65)]">
+                          <a 
+                            href={project.liveUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-[12px] font-medium text-[rgba(55,53,47,0.75)] hover:text-[#2383e2] hover:underline flex items-center gap-0.5 transition-colors py-1"
+                          >
+                            <span>Live Demo</span>
+                            <span className="text-[11px]">↗</span>
+                          </a>
+                          <a 
+                            href={project.githubUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-[12px] font-medium text-[rgba(55,53,47,0.75)] hover:text-[#2383e2] hover:underline flex items-center gap-0.5 transition-colors py-1"
+                          >
+                            <span>GitHub</span>
+                            <span className="text-[11px]">↗</span>
+                          </a>
+                        </div>
+                        <span className="text-[11px] text-[rgba(55,53,47,0.4)] flex items-center gap-0.5 group-hover:text-[#37352f] transition-colors py-1">
+                          <span>Details</span>
+                          <span className="material-symbols-outlined text-[13px]">arrow_forward</span>
+                        </span>
                       </div>
                     </div>
                   </div>
-                </div>
-
-                {/* CARD 2: Placeholder */}
-                <div className="group rounded-lg border border-dashed border-[#e9e9e7] bg-[#fbfbfa] hover:bg-white transition-all overflow-hidden flex flex-col cursor-pointer items-center justify-center min-h-[300px] text-center p-6">
-                  <span className="material-symbols-outlined text-[36px] text-[rgba(55,53,47,0.2)] mb-3">add_circle_outline</span>
-                  <h3 className="font-medium text-[15px] text-[rgba(55,53,47,0.45)] mb-1">Project 2</h3>
-                  <p className="text-[13px] text-[rgba(55,53,47,0.35)] max-w-[200px]">
-                    Project details coming soon. Click + New to add.
-                  </p>
-                </div>
-
-                {/* CARD 3: Placeholder */}
-                <div className="group rounded-lg border border-dashed border-[#e9e9e7] bg-[#fbfbfa] hover:bg-white transition-all overflow-hidden flex flex-col cursor-pointer items-center justify-center min-h-[300px] text-center p-6">
-                  <span className="material-symbols-outlined text-[36px] text-[rgba(55,53,47,0.2)] mb-3">add_circle_outline</span>
-                  <h3 className="font-medium text-[15px] text-[rgba(55,53,47,0.45)] mb-1">Project 3</h3>
-                  <p className="text-[13px] text-[rgba(55,53,47,0.35)] max-w-[200px]">
-                    Project details coming soon. Click + New to add.
-                  </p>
-                </div>
+                ))}
               </div>
             </section>
 
-            <div className="border-b border-[#e9e9e7] my-8"></div>
+            <div className="border-b border-[#e9e9e7]"></div>
 
             {/* ───────── EXPERIENCE SECTION ───────── */}
-            <section className="my-8" id="experience">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[18px]">🛠️</span>
-                <h2 className="text-[20px] font-bold text-[#37352f]">Engineering Experience</h2>
+            <section className="py-10 sm:py-16 md:py-20 scroll-mt-4 sm:scroll-mt-6" id="experience">
+              <div className="mb-5">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[18px]">🛠️</span>
+                  <h2 className="text-[20px] font-bold text-[#37352f]">Engineering Experience</h2>
+                </div>
+                <p className="text-[13px] text-[rgba(55,53,47,0.65)]">
+                  Hands-on experience building backend, full-stack, and distributed applications.
+                </p>
               </div>
-              <p className="text-[13px] text-[rgba(55,53,47,0.65)] mb-4">
-                Independent Software Development • Backend &amp; Full-Stack Projects
+
+              {/* 2x2 Card Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Card 1: Backend Engineering */}
+                <div className="rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] p-4 sm:p-5 hover:bg-white hover:border-[#d0d0cc] hover:shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition-all duration-200 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-[#daf1ea] text-[#1b6e56]">
+                        Backend Engineering
+                      </span>
+                    </div>
+                    <h3 className="text-[15px] font-bold text-[#37352f] mb-3">
+                      Backend Engineering
+                    </h3>
+                    <ul className="space-y-2 text-[13px] text-[rgba(55,53,47,0.7)] leading-relaxed">
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Designed and implemented <strong className="text-[#37352f] font-semibold">RESTful APIs</strong> using <strong className="text-[#37352f] font-semibold">Java and Spring Boot</strong>.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Built CRUD workflows with <strong className="text-[#37352f] font-semibold">validation, exception handling</strong>, and <strong className="text-[#37352f] font-semibold">transactional business logic</strong>.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Worked with <strong className="text-[#37352f] font-semibold">Spring Data JPA</strong> and <strong className="text-[#37352f] font-semibold">Hibernate</strong> for relational data access and persistence.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Developed backend services for applications including inventory, expense tracking, URL shortening, and AI-powered workflows.</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Card 2: API & Security */}
+                <div className="rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] p-4 sm:p-5 hover:bg-white hover:border-[#d0d0cc] hover:shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition-all duration-200 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-[#e8deee] text-[#5c3882]">
+                        API &amp; Security
+                      </span>
+                    </div>
+                    <h3 className="text-[15px] font-bold text-[#37352f] mb-3">
+                      API &amp; Security
+                    </h3>
+                    <ul className="space-y-2 text-[13px] text-[rgba(55,53,47,0.7)] leading-relaxed">
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Designed <strong className="text-[#37352f] font-semibold">REST API contracts</strong> and structured endpoints around business workflows.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Implemented authentication using <strong className="text-[#37352f] font-semibold">Spring Security</strong> and <strong className="text-[#37352f] font-semibold">JWT</strong>.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Worked with <strong className="text-[#37352f] font-semibold">stateless authentication</strong>, request validation, authorization checks, and secure API access.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Integrated <strong className="text-[#37352f] font-semibold">API Gateway patterns</strong> for centralized routing and request handling.</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Card 3: Distributed Systems */}
+                <div className="rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] p-4 sm:p-5 hover:bg-white hover:border-[#d0d0cc] hover:shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition-all duration-200 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-[#fadec9] text-[#854c1d]">
+                        Distributed Systems
+                      </span>
+                    </div>
+                    <h3 className="text-[15px] font-bold text-[#37352f] mb-3">
+                      Distributed Systems
+                    </h3>
+                    <ul className="space-y-2 text-[13px] text-[rgba(55,53,47,0.7)] leading-relaxed">
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Worked with <strong className="text-[#37352f] font-semibold">microservices architecture</strong> and service-oriented application design.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Implemented <strong className="text-[#37352f] font-semibold">event-driven communication</strong> using <strong className="text-[#37352f] font-semibold">Apache Kafka</strong>.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Built <strong className="text-[#37352f] font-semibold">real-time communication</strong> features using <strong className="text-[#37352f] font-semibold">WebSocket and STOMP</strong>.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Worked with service integration, <strong className="text-[#37352f] font-semibold">API Gateway routing</strong>, and communication between backend components.</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Card 4: Development & Delivery */}
+                <div className="rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] p-4 sm:p-5 hover:bg-white hover:border-[#d0d0cc] hover:shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition-all duration-200 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-[#dbeddb] text-[#286644]">
+                        Development &amp; Delivery
+                      </span>
+                    </div>
+                    <h3 className="text-[15px] font-bold text-[#37352f] mb-3">
+                      Development &amp; Delivery
+                    </h3>
+                    <ul className="space-y-2 text-[13px] text-[rgba(55,53,47,0.7)] leading-relaxed">
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Wrote service-layer <strong className="text-[#37352f] font-semibold">unit tests</strong> using <strong className="text-[#37352f] font-semibold">JUnit 5 and Mockito</strong>.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Used <strong className="text-[#37352f] font-semibold">Git and GitHub</strong> for version control, source management, and development workflows.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Containerized applications using <strong className="text-[#37352f] font-semibold">Docker</strong>.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[rgba(55,53,47,0.4)] select-none leading-[1.3] text-[15px]">•</span>
+                        <span>Built <strong className="text-[#37352f] font-semibold">CI/CD workflows</strong> with <strong className="text-[#37352f] font-semibold">GitHub Actions</strong> and deployed applications in Linux/cloud environments.</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* Optional Subtle Engineering Summary */}
+              <p className="mt-4 text-[12.5px] text-[rgba(55,53,47,0.55)] leading-relaxed">
+                Focused on backend systems, API design, distributed communication, testing, and production-oriented development.
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Backend Development */}
-                <div className="p-4 rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] hover:bg-white transition-colors flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="px-2 py-0.5 rounded text-[12px] font-semibold bg-[#d3e5ef] text-[#205d86]">Backend Development</span>
-                    </div>
-                    <ul className="list-disc list-inside text-[13px] text-[rgba(55,53,47,0.65)] space-y-2 leading-relaxed">
-                      <li>Built RESTful APIs using <strong className="text-[#37352f] font-medium">Java</strong> and <strong className="text-[#37352f] font-medium">Spring Boot</strong>.</li>
-                      <li>Developed services following a <strong className="text-[#37352f] font-medium">microservices architecture</strong>.</li>
-                      <li>Implemented <strong className="text-[#37352f] font-medium">authentication</strong>, authorization, validation, and exception handling.</li>
-                    </ul>
-                  </div>
-                </div>
-                {/* System Design */}
-                <div className="p-4 rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] hover:bg-white transition-colors flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="px-2 py-0.5 rounded text-[12px] font-semibold bg-[#e8deee] text-[#5c3882]">System Design</span>
-                    </div>
-                    <ul className="list-disc list-inside text-[13px] text-[rgba(55,53,47,0.65)] space-y-2 leading-relaxed">
-                      <li>Designed clear <strong className="text-[#37352f] font-medium">service boundaries</strong>, database schemas, and API contracts.</li>
-                      <li>Integrated backend services through an <strong className="text-[#37352f] font-medium">API Gateway</strong>.</li>
-                      <li>Used <strong className="text-[#37352f] font-medium">Docker</strong> for containerized development.</li>
-                    </ul>
-                  </div>
-                </div>
-                {/* Development Practices */}
-                <div className="p-4 rounded-lg border border-[#e9e9e7] bg-[#fbfbfa] hover:bg-white transition-colors flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="px-2 py-0.5 rounded text-[12px] font-semibold bg-[#dbeddb] text-[#286644]">Development Practices</span>
-                    </div>
-                    <ul className="list-disc list-inside text-[13px] text-[rgba(55,53,47,0.65)] space-y-2 leading-relaxed">
-                      <li>Used <strong className="text-[#37352f] font-medium">Git and GitHub</strong> for version control.</li>
-                      <li>Tested APIs and debugged application and integration issues.</li>
-                      <li>Documented project architecture and setup.</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
             </section>
 
-            <div className="border-b border-[#e9e9e7] my-8"></div>
+            <div className="border-b border-[#e9e9e7]"></div>
 
             {/* ───────── TECHNICAL STACK SECTION ───────── */}
-            <section className="my-8" id="skills">
+            <section className="py-10 sm:py-16 md:py-20 scroll-mt-4 sm:scroll-mt-6" id="skills">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[18px]">🛠️</span>
                 <h2 className="text-[20px] font-bold text-[#37352f]">Technical Stack</h2>
@@ -1588,7 +2482,7 @@ export default function App() {
               <p className="text-[13px] text-[rgba(55,53,47,0.65)] mb-5">Backend-focused technologies I use to build APIs, distributed systems, and production-ready applications.</p>
 
               {/* Interactive 3D Technology Map */}
-              <TechGlobe activeFilter={skillFilter} />
+              <TechGlobe activeFilter={skillFilter} theme={theme} />
 
               {/* Category Filter */}
               <div className="flex flex-wrap items-center gap-1.5 my-4" role="tablist" aria-label="Filter technologies by category">
@@ -1672,22 +2566,30 @@ export default function App() {
               </div>
             </section>
 
-            <div className="border-b border-[#e9e9e7] my-8"></div>
+            <div className="border-b border-[#e9e9e7]"></div>
 
             {/* ───────── EDUCATION SECTION ───────── */}
-            <section className="my-8" id="education">
+            <section className="py-10 sm:py-16 md:py-20 scroll-mt-4 sm:scroll-mt-6" id="education">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[18px]">🎓</span>
                 <h2 className="text-[20px] font-bold text-[#37352f]">Education</h2>
               </div>
               <p className="text-[13px] text-[rgba(55,53,47,0.65)] mb-4">Academic background and foundational coursework.</p>
-              <div className="p-4 rounded-lg border border-[#e9e9e7] bg-[#fbfbfa]">
+              <div className="p-4 sm:p-5 rounded-lg border border-[#e9e9e7] bg-[#fbfbfa]">
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 mb-3">
                   <div>
+                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                      <span className="px-2 py-0.5 rounded text-[10.5px] font-semibold bg-[#fadec9] text-[#854c1d]">
+                        Academic Background
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10.5px] font-semibold font-mono bg-[#dbeddb] text-[#286644]">
+                        CGPA: 8.0 / 10
+                      </span>
+                    </div>
                     <h3 className="text-[15px] font-bold text-[#37352f]">B.E. Computer Science &amp; Design</h3>
                     <div className="text-[13px] text-[rgba(55,53,47,0.65)] font-medium mt-0.5">New Horizon Institute of Technology and Management (NHITM) · Mumbai University</div>
                   </div>
-                  <span className="text-[12px] font-mono text-[rgba(55,53,47,0.45)] bg-white border border-[#e9e9e7] px-2 py-0.5 rounded shrink-0">
+                  <span className="text-[12px] font-mono text-[rgba(55,53,47,0.45)] bg-white border border-[#e9e9e7] px-2 py-0.5 rounded shrink-0 self-start mt-1 sm:mt-0">
                     2022 – 2026
                   </span>
                 </div>
@@ -1711,47 +2613,61 @@ export default function App() {
               </div>
             </section>
 
-            <div className="border-b border-[#e9e9e7] my-8"></div>
+            <div className="border-b border-[#e9e9e7]"></div>
 
             {/* ───────── CONTACT SECTION (Blue Callout) ───────── */}
-            <section className="my-8" id="contact">
-              <div className="rounded-lg bg-[#edf3f8] border border-[#dbe8f2] p-5 text-[#37352f]">
+            <section className="py-10 sm:py-16 md:py-20 scroll-mt-4 sm:scroll-mt-6" id="contact">
+              <div className="rounded-lg bg-[#edf3f8] border border-[#dbe8f2] p-4 sm:p-5 text-[#37352f]">
                 <div className="flex items-start gap-3">
                   <div className="text-[22px] select-none mt-0.5">📬</div>
                   <div className="flex-1">
-                    <h3 className="text-[16px] font-bold text-[#205d86] mb-1">
-                      Let's connect! I'm actively looking for full-time developer roles
+                    {/* Secondary Availability Status Badge */}
+                    <div className="mb-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-[#dbeddb] text-[#286644]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#286644]"></span>
+                        <span>Open to Software Development Opportunities</span>
+                      </span>
+                    </div>
+
+                    <h3 className="text-[17px] font-bold text-[#205d86] mb-1">
+                      Let&apos;s build something.
                     </h3>
                     <p className="text-[13px] text-[rgba(55,53,47,0.65)] mb-4 leading-relaxed">
-                      Looking for a dedicated software developer who builds reliable backend systems with Java &amp; Spring Boot? I'd love to chat about entry-level software development opportunities.
+                      Open to conversations about software development opportunities, interesting projects, and engineering work.
                     </p>
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3">
                       <button 
-                        className="px-3 py-1.5 bg-white border border-[#dbe8f2] rounded shadow-sm hover:bg-[#f7f7f5] text-[13px] font-medium text-[#37352f] flex items-center gap-2 transition-colors"
+                        className="min-h-[44px] px-3.5 py-2.5 bg-white border border-[#dbe8f2] rounded shadow-sm hover:bg-[#f7f7f5] text-[13px] font-medium text-[#37352f] flex items-center justify-center gap-2 transition-colors"
                         onClick={() => {
                           if (navigator.clipboard) {
-                            navigator.clipboard.writeText('chevulasaikiran@gmail.com');
+                            navigator.clipboard.writeText('schevula26@gmail.com');
                           }
-                          showToast('Email copied to clipboard!', 'check_circle');
+                          showToast('Email (schevula26@gmail.com) copied!', 'check_circle');
                         }}
                       >
                         <span className="material-symbols-outlined text-[16px] text-[rgba(55,53,47,0.45)]">content_copy</span>
                         <span>Copy Email</span>
                       </button>
-                      <a className="px-3 py-1.5 bg-[#2383e2] hover:bg-[#1a70c5] text-white rounded text-[13px] font-medium flex items-center gap-1.5 transition-colors shadow-sm" href="mailto:chevulasaikiran@gmail.com">
+                      <a 
+                        className="min-h-[44px] px-3.5 py-2.5 bg-[#2383e2] hover:bg-[#1a70c5] text-white rounded text-[13px] font-medium flex items-center justify-center gap-1.5 transition-colors shadow-sm" 
+                        href="mailto:schevula26@gmail.com"
+                      >
                         <span className="material-symbols-outlined text-[16px]">send</span>
                         <span>Send Email Directly</span>
                       </a>
                     </div>
-                    <div className="mt-4 pt-3 border-t border-[#dbe8f2]/60 flex items-center justify-between text-[12px] text-[rgba(55,53,47,0.65)]" id="resume">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-[16px] text-[#205d86]">description</span>
-                        <span>Saikiran_Chevula_Resume.pdf</span>
-                      </div>
-                      <span className="font-medium text-[#205d86] flex items-center gap-1 cursor-pointer hover:underline">
-                        Download Resume
-                        <span className="material-symbols-outlined text-[14px]">arrow_downward</span>
-                      </span>
+                    <div className="mt-4 pt-3 border-t border-[#dbe8f2]/60 flex items-center text-[12px]" id="resume">
+                      <a 
+                        href="/Saikiran_Chevula_Resume.pdf" 
+                        download="Saikiran_Chevula_Resume.pdf"
+                        onClick={() => {
+                          showToast('Resume download started', 'download');
+                        }}
+                        className="inline-flex items-center gap-1.5 font-medium text-[#205d86] hover:underline cursor-pointer py-1.5 min-h-[40px]"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">description</span>
+                        <span>Download Resume ↓</span>
+                      </a>
                     </div>
                   </div>
                 </div>
@@ -1759,18 +2675,18 @@ export default function App() {
             </section>
 
             {/* FOOTER */}
-            <footer className="mt-16 pt-6 border-t border-[#e9e9e7] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px] text-[rgba(55,53,47,0.45)] select-none mb-8">
-              <div className="flex items-center gap-2">
-                <span>Made with care in Notion style</span>
+            <footer className="mt-10 pt-5 border-t border-[#e9e9e7] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px] text-[rgba(55,53,47,0.45)] select-none mb-8 text-center sm:text-left">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                <span>Built with care · Inspired by Notion</span>
                 <span>•</span>
                 <span>© {new Date().getFullYear()} Saikiran Chevula</span>
               </div>
               <div className="flex items-center gap-3">
-                <a className="hover:text-[#37352f]" href="#about">Back to Top ↑</a>
+                <a className="hover:text-[#37352f] py-1" href="#about">Back to Top ↑</a>
                 <span>•</span>
-                <a className="hover:text-[#37352f]" href="https://github.com/SaikiranC08" target="_blank" rel="noopener noreferrer">GitHub</a>
+                <a className="hover:text-[#37352f] py-1" href="https://github.com/SaikiranC08" target="_blank" rel="noopener noreferrer">GitHub</a>
                 <span>•</span>
-                <a className="hover:text-[#37352f]" href="https://www.linkedin.com/in/saikiran-chevula/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                <a className="hover:text-[#37352f] py-1" href="https://www.linkedin.com/in/saikiran-chevula/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
               </div>
             </footer>
           </div>
@@ -1781,11 +2697,11 @@ export default function App() {
       {/* SEARCH MODAL OVERLAY */}
       {searchOpen && (
         <div 
-          className="fixed inset-0 z-50 bg-black/25 backdrop-blur-[1.5px] flex items-start justify-center pt-16 sm:pt-24 px-4"
+          className="fixed inset-0 z-50 bg-black/25 backdrop-blur-[1.5px] flex items-start justify-center pt-3 sm:pt-20 px-3 sm:px-4"
           onClick={() => setSearchOpen(false)}
         >
           <div 
-            className="w-full max-w-[560px] bg-white rounded-xl shadow-2xl border border-[#e9e9e7] overflow-hidden flex flex-col max-h-[75vh]"
+            className="w-full max-w-[560px] bg-white rounded-xl shadow-2xl border border-[#e9e9e7] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[75vh]"
             onClick={e => e.stopPropagation()}
           >
             {/* Search Input Bar */}
@@ -1797,12 +2713,13 @@ export default function App() {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Search projects, technologies, experience..."
-                className="flex-1 text-[14px] text-[#37352f] placeholder-[rgba(55,53,47,0.4)] outline-none bg-transparent"
+                className="flex-1 text-[16px] sm:text-[14px] text-[#37352f] placeholder-[rgba(55,53,47,0.4)] outline-none bg-transparent"
               />
               {searchQuery && (
                 <button 
                   onClick={() => setSearchQuery('')}
                   className="p-1 rounded hover:bg-[rgba(55,53,47,0.08)] text-[rgba(55,53,47,0.4)] hover:text-[#37352f]"
+                  aria-label="Clear search query"
                 >
                   <span className="material-symbols-outlined text-[16px]">close</span>
                 </button>
@@ -1821,9 +2738,13 @@ export default function App() {
                     onClick={() => {
                       setSearchOpen(false);
                       setSearchQuery('');
-                      handleNavigate('portfolio', item.target);
+                      if (item.page) {
+                        handleNavigate(item.page);
+                      } else {
+                        handleNavigate('portfolio', item.target);
+                      }
                     }}
-                    className="w-full text-left p-2.5 rounded-lg hover:bg-[rgba(55,53,47,0.05)] transition-colors flex items-start justify-between gap-3 group"
+                    className="w-full text-left p-3 sm:p-2.5 rounded-lg hover:bg-[rgba(55,53,47,0.05)] transition-colors flex items-start justify-between gap-3 group min-h-[44px]"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
